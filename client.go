@@ -50,6 +50,10 @@ func (c *Client) DoRAW(
 	payload io.Reader,
 	response any,
 ) error {
+	if method == "" {
+		return newInternalError("DoRAW", fmt.Errorf("empty method"))
+	}
+
 	base := strings.TrimRight(c.config.BaseURL, "/")
 	fullURL, err := url.JoinPath(base, path)
 	if err != nil {
@@ -75,7 +79,8 @@ func (c *Client) DoRAW(
 	}()
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		body, _ := io.ReadAll(resp.Body)
+		const maxErrBody = 1 << 20 // 1 MiB
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
 
 		return c.formatError(resp.StatusCode, body, fullURL)
 	}
@@ -95,10 +100,10 @@ func (c *Client) DoRAW(
 	return nil
 }
 
-func (c *Client) formatError(statusCode int, body []byte, url string) error {
+func (c *Client) formatError(statusCode int, body []byte, reqURL string) error {
 	return &APIError{
 		StatusCode: statusCode,
-		URL:        url,
+		URL:        reqURL,
 		Body:       body,
 	}
 }
