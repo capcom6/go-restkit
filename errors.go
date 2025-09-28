@@ -1,47 +1,118 @@
 package restkit
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 )
 
-var (
-	// ErrAPIError is the root category for errors originating from the API.
-	ErrAPIError = errors.New("api error")
-	// ErrClient represents 4xx-class client-side errors.
-	ErrClient = fmt.Errorf("%w: client error", ErrAPIError)
-	// ErrServer represents 5xx-class server-side errors.
-	ErrServer = fmt.Errorf("%w: server error", ErrAPIError)
-)
+// ErrorWithBody provides access to raw error response bodies
+type ErrorWithBody interface {
+	RawBody() []byte             // RawBody returns the raw error response body
+	ParseError(target any) error // ParseError attempts to parse the error body
+}
 
-var (
-	// ErrBadRequest indicates a 400 Bad Request.
-	ErrBadRequest = fmt.Errorf("%w: validation failed", ErrClient)
-	// ErrConflict indicates a 409 Conflict.
-	ErrConflict = fmt.Errorf("%w: conflict", ErrClient)
-)
+// InternalError represents errors in request construction
+type InternalError struct {
+	Err error  // Underlying error
+	Op  string // Operation where error occurred
+}
 
-// IsAPIError reports whether err is in the API error category.
+func (e *InternalError) Error() string {
+	return fmt.Sprintf("rest: %s: %v", e.Op, e.Err)
+}
+
+func (e *InternalError) Unwrap() error { return e.Err }
+
+// newInternalError creates a new InternalError
+func newInternalError(op string, err error) *InternalError {
+	return &InternalError{Err: err, Op: op}
+}
+
+// InfrastructureError represents network-level failures
+type InfrastructureError struct {
+	Err error
+	URL string
+}
+
+func (e *InfrastructureError) Error() string {
+	return fmt.Sprintf("rest: infrastructure error contacting %s: %v", e.URL, e.Err)
+}
+
+func (e *InfrastructureError) Unwrap() error { return e.Err }
+
+// newInfrastructureError creates a new InfrastructureError
+func newInfrastructureError(url string, err error) *InfrastructureError {
+	return &InfrastructureError{Err: err, URL: url}
+}
+
+// APIError represents server responses with error status codes
+type APIError struct {
+	StatusCode int    // HTTP status code
+	URL        string // URL of the request
+	Body       []byte // Raw error response body
+	Parsed     any    // Optional parsed error structure
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("rest: API error %d from %s: %s",
+		e.StatusCode, e.URL, string(e.Body))
+}
+
+// RawBody returns the raw error response body
+func (e *APIError) RawBody() []byte {
+	return e.Body
+}
+
+// ParseError attempts to parse the error body into the provided struct
+func (e *APIError) ParseError(target any) error {
+	if len(e.Body) == 0 {
+		return errors.New("empty error body")
+	}
+	return json.Unmarshal(e.Body, target)
+}
+
+// AsAPIError attempts to extract an APIError from an error chain
+func AsAPIError(err error) (*APIError, bool) {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr, true
+	}
+	return nil, false
+}
+
+// IsInternalError checks if error is an internal library error
+func IsInternalError(err error) bool {
+	var target *InternalError
+	return errors.As(err, &target)
+}
+
+// IsInfrastructureError checks if error is a network infrastructure error
+func IsInfrastructureError(err error) bool {
+	var target *InfrastructureError
+	return errors.As(err, &target)
+}
+
+// IsAPIError checks if an error is an API error with a response body
 func IsAPIError(err error) bool {
-	return errors.Is(err, ErrAPIError)
+	var target ErrorWithBody
+	return errors.As(err, &target)
 }
 
 // IsClientError reports whether err is a client (4xx) error.
+// This function now works with the new error hierarchy while maintaining backward compatibility.
 func IsClientError(err error) bool {
-	return errors.Is(err, ErrClient)
+	// Check new API error types first
+	apiErr, ok := AsAPIError(err)
+
+	return ok && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500
 }
 
 // IsServerError reports whether err is a server (5xx) error.
+// This function now works with the new error hierarchy while maintaining backward compatibility.
 func IsServerError(err error) bool {
-	return errors.Is(err, ErrServer)
-}
+	// Check new API error types first
+	apiErr, ok := AsAPIError(err)
 
-// IsConflict reports whether err indicates a 409 Conflict.
-func IsConflict(err error) bool {
-	return errors.Is(err, ErrConflict)
-}
-
-// IsBadRequest reports whether err indicates a 400 Bad Request.
-func IsBadRequest(err error) bool {
-	return errors.Is(err, ErrBadRequest)
+	return ok && apiErr.StatusCode >= 500
 }
