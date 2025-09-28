@@ -87,7 +87,9 @@ func TestClient_Do(t *testing.T) {
 		{
 			name: "Empty method",
 			fields: fields{
-				config: rest.Config{},
+				config: rest.Config{
+					BaseURL: httpServer.URL,
+				},
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -111,7 +113,7 @@ func TestClient_Do(t *testing.T) {
 				payload: map[string]string{
 					"foo": "bar",
 				},
-				response: make(map[string]any),
+				response: new(map[string]any),
 			},
 			wantErr:     false,
 			wantErrType: nil, // No error expected
@@ -202,7 +204,7 @@ func TestClient_Do(t *testing.T) {
 				ctx:      context.Background(),
 				method:   http.MethodGet,
 				path:     "/corrupt",
-				response: make(map[string]any),
+				response: new(map[string]any),
 			},
 			wantErr:     true,
 			wantErrType: nil, // No specific error type expected

@@ -6,7 +6,10 @@ import (
 	"fmt"
 )
 
-// ErrorWithBody provides access to raw error response bodies
+var ErrEmptyErrorBody = errors.New("rest: empty error body")
+
+// ErrorWithBody provides access to raw error response bodies.
+// ParseError expects target to be a pointer to a struct; it returns a json.Unmarshal error otherwise.
 type ErrorWithBody interface {
 	RawBody() []byte             // RawBody returns the raw error response body
 	ParseError(target any) error // ParseError attempts to parse the error body
@@ -51,7 +54,6 @@ type APIError struct {
 	StatusCode int    // HTTP status code
 	URL        string // URL of the request
 	Body       []byte // Raw error response body
-	Parsed     any    // Optional parsed error structure
 }
 
 func (e *APIError) Error() string {
@@ -67,7 +69,7 @@ func (e *APIError) RawBody() []byte {
 // ParseError attempts to parse the error body into the provided struct
 func (e *APIError) ParseError(target any) error {
 	if len(e.Body) == 0 {
-		return errors.New("empty error body")
+		return ErrEmptyErrorBody
 	}
 	return json.Unmarshal(e.Body, target)
 }
@@ -114,5 +116,8 @@ func IsServerError(err error) bool {
 	// Check new API error types first
 	apiErr, ok := AsAPIError(err)
 
-	return ok && apiErr.StatusCode >= 500
+	return ok && apiErr.StatusCode >= 500 && apiErr.StatusCode < 600
 }
+
+// Ensure APIError implements ErrorWithBody.
+var _ ErrorWithBody = (*APIError)(nil)
