@@ -25,7 +25,7 @@ func (c *Client) Do(ctx context.Context, method, path string, headers map[string
 	if payload != nil {
 		jsonBytes, err := json.Marshal(payload)
 		if err != nil {
-			return fmt.Errorf("failed to marshal payload: %w", err)
+			return newInternalError("Do", fmt.Errorf("failed to marshal payload: %w", err))
 		}
 		reqBody = bytes.NewReader(jsonBytes)
 	}
@@ -53,12 +53,12 @@ func (c *Client) DoRAW(
 	base := strings.TrimRight(c.config.BaseURL, "/")
 	fullURL, err := url.JoinPath(base, path)
 	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
+		return newInternalError("DoRAW", fmt.Errorf("invalid URL: %w", err))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, payload)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return newInternalError("DoRAW", fmt.Errorf("failed to create request: %w", err))
 	}
 
 	for k, v := range headers {
@@ -67,7 +67,7 @@ func (c *Client) DoRAW(
 
 	resp, err := c.config.Client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to make request: %w", err)
+		return newInfrastructureError(fullURL, err)
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -77,7 +77,7 @@ func (c *Client) DoRAW(
 	if resp.StatusCode >= http.StatusBadRequest {
 		body, _ := io.ReadAll(resp.Body)
 
-		return c.formatError(resp.StatusCode, body)
+		return c.formatError(resp.StatusCode, body, fullURL)
 	}
 
 	if resp.StatusCode == http.StatusNoContent {
@@ -89,26 +89,18 @@ func (c *Client) DoRAW(
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
+		return newInternalError("DoRAW", fmt.Errorf("failed to decode response: %w", err))
 	}
 
 	return nil
 }
 
-func (c *Client) formatError(statusCode int, body []byte) error {
-	switch statusCode {
-	case http.StatusBadRequest:
-		return fmt.Errorf("%w: %s", ErrBadRequest, string(body))
-	case http.StatusConflict:
-		return fmt.Errorf("%w: %s", ErrConflict, string(body))
+func (c *Client) formatError(statusCode int, body []byte, url string) error {
+	return &APIError{
+		StatusCode: statusCode,
+		URL:        url,
+		Body:       body,
 	}
-
-	if statusCode >= http.StatusInternalServerError {
-		return fmt.Errorf("%w: unexpected status code %d with body %s", ErrServer, statusCode, string(body))
-	}
-
-	// All other client errors (400-499)
-	return fmt.Errorf("%w: unexpected status code %d with body %s", ErrClient, statusCode, string(body))
 }
 
 func NewClient(config Config) *Client {

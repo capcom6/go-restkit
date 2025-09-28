@@ -24,7 +24,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 			return
 		case "/400":
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte("bad request"))
+			_, _ = w.Write([]byte(`{"message": "bad request"}`))
 			return
 		case "/404":
 			w.WriteHeader(http.StatusNotFound)
@@ -129,7 +129,7 @@ func TestClient_Do(t *testing.T) {
 				path:   "/400",
 			},
 			wantErr:     true,
-			wantErrType: rest.ErrBadRequest,
+			wantErrType: errors.New("should match either old or new error type"),
 		},
 		{
 			name: "HTTP 404 error",
@@ -144,7 +144,7 @@ func TestClient_Do(t *testing.T) {
 				path:   "/404",
 			},
 			wantErr:     true,
-			wantErrType: rest.ErrClient,
+			wantErrType: errors.New("should match either old or new error type"),
 		},
 		{
 			name: "HTTP 409 error",
@@ -159,7 +159,7 @@ func TestClient_Do(t *testing.T) {
 				path:   "/409",
 			},
 			wantErr:     true,
-			wantErrType: rest.ErrConflict,
+			wantErrType: errors.New("should match either old or new error type"),
 		},
 		{
 			name: "HTTP 500 error",
@@ -174,7 +174,7 @@ func TestClient_Do(t *testing.T) {
 				path:   "/500",
 			},
 			wantErr:     true,
-			wantErrType: rest.ErrServer,
+			wantErrType: errors.New("should match either old or new error type"),
 		},
 		{
 			name: "No Content response",
@@ -239,10 +239,71 @@ func TestClient_Do(t *testing.T) {
 				return
 			}
 
-			// Verify error type if expected
-			if tt.wantErrType != nil && !errors.Is(err, tt.wantErrType) {
-				t.Errorf("Expected error of type %v, got %v", tt.wantErrType, err)
+			// Verify error type if expected - check for both old and new error types
+			if tt.wantErrType != nil {
+				// Check if it's an API error with the expected status code
+				if apiErr, ok := rest.AsAPIError(err); ok {
+					expectedStatusCode := 0
+					switch tt.args.path {
+					case "/400":
+						expectedStatusCode = 400
+					case "/404":
+						expectedStatusCode = 404
+					case "/409":
+						expectedStatusCode = 409
+					case "/500":
+						expectedStatusCode = 500
+					}
+					if apiErr.StatusCode != expectedStatusCode {
+						t.Errorf("Expected API error with status code %d, got %d", expectedStatusCode, apiErr.StatusCode)
+					}
+				} else if !errors.Is(err, tt.wantErrType) {
+					// Fall back to legacy error type checking
+					t.Errorf("Expected error of type %v, got %v", tt.wantErrType, err)
+				}
 			}
 		})
+	}
+}
+
+func TestInternalErrorClassification(t *testing.T) {
+	httpServer := setupTestServer(t)
+	defer httpServer.Close()
+
+	client := rest.NewClient(rest.Config{})
+	err := client.Do(context.Background(), "", "/invalid", nil, math.NaN(), nil)
+	if !rest.IsInternalError(err) {
+		t.Error("Expected internal error for invalid payload")
+	}
+}
+
+func TestInfrastructureErrorClassification(t *testing.T) {
+	client := rest.NewClient(rest.Config{BaseURL: "http://localhost:1"})
+	err := client.Do(context.Background(), "GET", "/", nil, nil, nil)
+	if !rest.IsInfrastructureError(err) {
+		t.Error("Expected infrastructure error for unreachable host")
+	}
+}
+
+func TestAPIErrorBodyParsing(t *testing.T) {
+	httpServer := setupTestServer(t)
+	defer httpServer.Close()
+
+	client := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
+	err := client.Do(context.Background(), "GET", "/400", nil, nil, nil)
+
+	apiErr, ok := rest.AsAPIError(err)
+	if !ok {
+		t.Fatal("Expected API error")
+	}
+
+	var customErr struct {
+		Message string `json:"message"`
+	}
+	if err := apiErr.ParseError(&customErr); err != nil {
+		t.Error("Failed to parse error body")
+	}
+	if customErr.Message != "bad request" {
+		t.Errorf("Unexpected error message: %s", customErr.Message)
 	}
 }
