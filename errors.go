@@ -7,7 +7,8 @@ import (
 )
 
 var (
-	ErrEmptyMethod    = errors.New("empty method")
+	ErrInvalidConfig  = errors.New("rest: invalid config")
+	ErrEmptyMethod    = errors.New("rest: empty method")
 	ErrEmptyErrorBody = errors.New("rest: empty error body")
 	ErrUnmarshalJSON  = errors.New("rest: failed to unmarshal body")
 )

@@ -222,7 +222,7 @@ func TestClient_Do(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := rest.NewClient(tt.fields.config)
+			c, _ := rest.NewClient(tt.fields.config)
 			err := c.Do(tt.args.ctx, tt.args.method, tt.args.path, tt.args.headers, tt.args.payload, tt.args.response)
 
 			if (err != nil) != tt.wantErr {
@@ -249,7 +249,7 @@ func TestInternalErrorClassification(t *testing.T) {
 	httpServer := setupTestServer(t)
 	defer httpServer.Close()
 
-	client := rest.NewClient(rest.Config{})
+	client, _ := rest.NewClient(rest.Config{})
 	err := client.Do(context.Background(), "", "/invalid", nil, math.NaN(), nil)
 	if !rest.IsInternalError(err) {
 		t.Error("Expected internal error for invalid payload")
@@ -257,7 +257,7 @@ func TestInternalErrorClassification(t *testing.T) {
 }
 
 func TestInfrastructureErrorClassification(t *testing.T) {
-	client := rest.NewClient(rest.Config{BaseURL: "http://localhost:1"})
+	client, _ := rest.NewClient(rest.Config{BaseURL: "http://localhost:1"})
 	err := client.Do(context.Background(), "GET", "/", nil, nil, nil)
 	if !rest.IsInfrastructureError(err) {
 		t.Error("Expected infrastructure error for unreachable host")
@@ -268,7 +268,7 @@ func TestAPIErrorBodyParsing(t *testing.T) {
 	httpServer := setupTestServer(t)
 	defer httpServer.Close()
 
-	client := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
+	client, _ := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
 	err := client.Do(context.Background(), "GET", "/400", nil, nil, nil)
 
 	apiErr, ok := rest.AsAPIError(err)

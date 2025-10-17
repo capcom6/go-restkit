@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 )
 
 type Config struct {
@@ -17,7 +16,8 @@ type Config struct {
 }
 
 type Client struct {
-	config Config
+	client  *http.Client
+	baseURL *url.URL
 }
 
 func (c *Client) Do(ctx context.Context, method, path string, headers map[string]string, payload, response any) error {
@@ -33,10 +33,10 @@ func (c *Client) Do(ctx context.Context, method, path string, headers map[string
 	if headers == nil {
 		headers = make(map[string]string)
 	}
-	if _, ok := headers["Accept"]; !ok {
+	if headers["Accept"] == "" {
 		headers["Accept"] = "application/json"
 	}
-	if reqBody != nil {
+	if reqBody != nil && headers["Content-Type"] == "" {
 		headers["Content-Type"] = "application/json"
 	}
 
@@ -51,14 +51,17 @@ func (c *Client) DoRAW(
 	response any,
 ) error {
 	if method == "" {
-		return newInternalError("DoRAW", ErrEmptyMethod)
+		return ErrEmptyMethod
 	}
 
-	base := strings.TrimRight(c.config.BaseURL, "/")
-	fullURL, err := url.JoinPath(base, path)
+	// Parse the path (this preserves query parameters)
+	pathURL, err := url.Parse(path)
 	if err != nil {
-		return newInternalError("DoRAW", fmt.Errorf("invalid URL: %w", err))
+		return newInternalError("DoRAW", fmt.Errorf("failed to parse path: %w", err))
 	}
+
+	// Resolve the path against the base URL to get a properly encoded full URL
+	fullURL := c.baseURL.ResolveReference(pathURL).String()
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, payload)
 	if err != nil {
@@ -69,7 +72,7 @@ func (c *Client) DoRAW(
 		req.Header.Set(k, v)
 	}
 
-	resp, err := c.config.Client.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return newInfrastructureError(fullURL, err)
 	}
@@ -108,10 +111,23 @@ func (c *Client) formatError(statusCode int, body []byte, reqURL string) error {
 	}
 }
 
-func NewClient(config Config) *Client {
+func NewClient(config Config) (*Client, error) {
 	if config.Client == nil {
 		config.Client = http.DefaultClient
 	}
 
-	return &Client{config: config}
+	// Parse the base URL
+	baseURL, err := url.Parse(config.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base URL: %w", err)
+	}
+
+	if config.BaseURL != "" && baseURL.Scheme == "" {
+		return nil, fmt.Errorf("%w: base URL must be absolute (got %q)", ErrInvalidConfig, config.BaseURL)
+	}
+
+	return &Client{
+		client:  config.Client,
+		baseURL: baseURL,
+	}, nil
 }
