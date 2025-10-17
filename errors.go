@@ -6,7 +6,11 @@ import (
 	"fmt"
 )
 
-var ErrEmptyErrorBody = errors.New("rest: empty error body")
+var (
+	ErrEmptyMethod    = errors.New("empty method")
+	ErrEmptyErrorBody = errors.New("rest: empty error body")
+	ErrUnmarshalJSON  = errors.New("rest: failed to unmarshal body")
+)
 
 // ErrorWithBody provides access to raw error response bodies.
 // ParseError expects target to be a pointer to a struct; it returns a json.Unmarshal error otherwise.
@@ -71,7 +75,10 @@ func (e *APIError) ParseError(target any) error {
 	if len(e.Body) == 0 {
 		return ErrEmptyErrorBody
 	}
-	return json.Unmarshal(e.Body, target)
+	if err := json.Unmarshal(e.Body, target); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnmarshalJSON, err)
+	}
+	return nil
 }
 
 // AsAPIError attempts to extract an APIError from an error chain
