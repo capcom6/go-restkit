@@ -51,7 +51,7 @@ func (c *Client) DoRAW(
 	response any,
 ) error {
 	if method == "" {
-		return newInternalError("DoRAW", fmt.Errorf("empty method"))
+		return newInternalError("DoRAW", ErrEmptyMethod)
 	}
 
 	base := strings.TrimRight(c.config.BaseURL, "/")

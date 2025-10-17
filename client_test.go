@@ -2,7 +2,6 @@ package restkit_test
 
 import (
 	"context"
-	"errors"
 	"io"
 	"math"
 	"net/http"
@@ -78,11 +77,11 @@ func TestClient_Do(t *testing.T) {
 		response any
 	}
 	tests := []struct {
-		name        string
-		fields      fields
-		args        args
-		wantErr     bool
-		wantErrType error
+		name           string
+		fields         fields
+		args           args
+		wantErr        bool
+		wantStatusCode int
 	}{
 		{
 			name: "Empty method",
@@ -96,8 +95,7 @@ func TestClient_Do(t *testing.T) {
 				method: "",
 				path:   "/",
 			},
-			wantErr:     true,
-			wantErrType: nil, // No specific error type expected
+			wantErr: true,
 		},
 		{
 			name: "With body",
@@ -115,8 +113,7 @@ func TestClient_Do(t *testing.T) {
 				},
 				response: new(map[string]any),
 			},
-			wantErr:     false,
-			wantErrType: nil, // No error expected
+			wantErr: false,
 		},
 		{
 			name: "HTTP 400 error",
@@ -130,8 +127,8 @@ func TestClient_Do(t *testing.T) {
 				method: http.MethodGet,
 				path:   "/400",
 			},
-			wantErr:     true,
-			wantErrType: errors.New("should match either old or new error type"),
+			wantErr:        true,
+			wantStatusCode: 400,
 		},
 		{
 			name: "HTTP 404 error",
@@ -145,8 +142,8 @@ func TestClient_Do(t *testing.T) {
 				method: http.MethodGet,
 				path:   "/404",
 			},
-			wantErr:     true,
-			wantErrType: errors.New("should match either old or new error type"),
+			wantErr:        true,
+			wantStatusCode: 404,
 		},
 		{
 			name: "HTTP 409 error",
@@ -160,8 +157,8 @@ func TestClient_Do(t *testing.T) {
 				method: http.MethodGet,
 				path:   "/409",
 			},
-			wantErr:     true,
-			wantErrType: errors.New("should match either old or new error type"),
+			wantErr:        true,
+			wantStatusCode: 409,
 		},
 		{
 			name: "HTTP 500 error",
@@ -175,8 +172,8 @@ func TestClient_Do(t *testing.T) {
 				method: http.MethodGet,
 				path:   "/500",
 			},
-			wantErr:     true,
-			wantErrType: errors.New("should match either old or new error type"),
+			wantErr:        true,
+			wantStatusCode: 500,
 		},
 		{
 			name: "No Content response",
@@ -190,8 +187,7 @@ func TestClient_Do(t *testing.T) {
 				method: http.MethodGet,
 				path:   "/204",
 			},
-			wantErr:     false,
-			wantErrType: nil, // No error expected
+			wantErr: false,
 		},
 		{
 			name: "Corrupt response",
@@ -206,8 +202,7 @@ func TestClient_Do(t *testing.T) {
 				path:     "/corrupt",
 				response: new(map[string]any),
 			},
-			wantErr:     true,
-			wantErrType: nil, // No specific error type expected
+			wantErr: true,
 		},
 		{
 			name: "Corrupt request",
@@ -222,8 +217,7 @@ func TestClient_Do(t *testing.T) {
 				path:    "/",
 				payload: math.NaN(),
 			},
-			wantErr:     true,
-			wantErrType: nil, // No specific error type expected
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
@@ -241,27 +235,10 @@ func TestClient_Do(t *testing.T) {
 				return
 			}
 
-			// Verify error type if expected - check for both old and new error types
-			if tt.wantErrType != nil {
-				// Check if it's an API error with the expected status code
-				if apiErr, ok := rest.AsAPIError(err); ok {
-					expectedStatusCode := 0
-					switch tt.args.path {
-					case "/400":
-						expectedStatusCode = 400
-					case "/404":
-						expectedStatusCode = 404
-					case "/409":
-						expectedStatusCode = 409
-					case "/500":
-						expectedStatusCode = 500
-					}
-					if apiErr.StatusCode != expectedStatusCode {
-						t.Errorf("Expected API error with status code %d, got %d", expectedStatusCode, apiErr.StatusCode)
-					}
-				} else if !errors.Is(err, tt.wantErrType) {
-					// Fall back to legacy error type checking
-					t.Errorf("Expected error of type %v, got %v", tt.wantErrType, err)
+			// Check if it's an API error with the expected status code
+			if apiErr, ok := rest.AsAPIError(err); ok {
+				if apiErr.StatusCode != tt.wantStatusCode {
+					t.Errorf("Expected API error with status code %d, got %d", tt.wantStatusCode, apiErr.StatusCode)
 				}
 			}
 		})

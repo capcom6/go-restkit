@@ -8,12 +8,18 @@ import (
 	liberr "github.com/capcom6/go-restkit"
 )
 
+var (
+	errWrapped     = errors.New("original error")
+	errNotAPI      = errors.New("not API error")
+	errNotInfra    = errors.New("not infrastructure error")
+	errNotInternal = errors.New("not internal error")
+)
+
 func TestInternalError(t *testing.T) {
 	t.Parallel()
 
-	wrappedErr := errors.New("original error")
 	internalErr := &liberr.InternalError{
-		Err: wrappedErr,
+		Err: errWrapped,
 		Op:  "test operation",
 	}
 
@@ -21,11 +27,11 @@ func TestInternalError(t *testing.T) {
 		t.Errorf("Expected error message 'rest: test operation: original error', got '%s'", internalErr.Error())
 	}
 
-	if !errors.Is(internalErr, wrappedErr) {
+	if !errors.Is(internalErr, errWrapped) {
 		t.Error("Expected InternalError to wrap the original error")
 	}
 
-	if internalErr.Unwrap() != wrappedErr {
+	if !errors.Is(internalErr.Unwrap(), errWrapped) {
 		t.Error("Unwrap() should return the original error")
 	}
 }
@@ -33,21 +39,20 @@ func TestInternalError(t *testing.T) {
 func TestInfrastructureError(t *testing.T) {
 	t.Parallel()
 
-	wrappedErr := errors.New("connection failed")
 	infraErr := &liberr.InfrastructureError{
-		Err: wrappedErr,
+		Err: errWrapped,
 		URL: "http://example.com",
 	}
 
-	if infraErr.Error() != "rest: infrastructure error contacting http://example.com: connection failed" {
-		t.Errorf("Expected error message 'rest: infrastructure error contacting http://example.com: connection failed', got '%s'", infraErr.Error())
+	if infraErr.Error() != "rest: infrastructure error contacting http://example.com: original error" {
+		t.Errorf("Expected error message 'rest: infrastructure error contacting http://example.com: original error', got '%s'", infraErr.Error())
 	}
 
-	if !errors.Is(infraErr, wrappedErr) {
+	if !errors.Is(infraErr, errWrapped) {
 		t.Error("Expected InfrastructureError to wrap the original error")
 	}
 
-	if infraErr.Unwrap() != wrappedErr {
+	if !errors.Is(infraErr.Unwrap(), errWrapped) {
 		t.Error("Unwrap() should return the original error")
 	}
 }
@@ -119,7 +124,7 @@ func TestAsAPIError(t *testing.T) {
 	}
 
 	// Test with non-APIError
-	_, ok = liberr.AsAPIError(errors.New("not an API error"))
+	_, ok = liberr.AsAPIError(errNotAPI)
 	if ok {
 		t.Error("AsAPIError should return false for non-APIError")
 	}
@@ -129,7 +134,7 @@ func TestIsInternalError(t *testing.T) {
 	t.Parallel()
 
 	internalErr := &liberr.InternalError{
-		Err: errors.New("test"),
+		Err: errWrapped,
 		Op:  "test",
 	}
 
@@ -137,7 +142,7 @@ func TestIsInternalError(t *testing.T) {
 		t.Error("IsInternalError should return true for InternalError")
 	}
 
-	if liberr.IsInternalError(errors.New("not internal")) {
+	if liberr.IsInternalError(errNotInternal) {
 		t.Error("IsInternalError should return false for non-InternalError")
 	}
 }
@@ -146,7 +151,7 @@ func TestIsInfrastructureError(t *testing.T) {
 	t.Parallel()
 
 	infraErr := &liberr.InfrastructureError{
-		Err: errors.New("test"),
+		Err: errWrapped,
 		URL: "http://example.com",
 	}
 
@@ -154,7 +159,7 @@ func TestIsInfrastructureError(t *testing.T) {
 		t.Error("IsInfrastructureError should return true for InfrastructureError")
 	}
 
-	if liberr.IsInfrastructureError(errors.New("not infrastructure")) {
+	if liberr.IsInfrastructureError(errNotInfra) {
 		t.Error("IsInfrastructureError should return false for non-InfrastructureError")
 	}
 }
@@ -172,7 +177,7 @@ func TestIsAPIError(t *testing.T) {
 		t.Error("IsAPIError should return true for APIError")
 	}
 
-	if liberr.IsAPIError(errors.New("not API error")) {
+	if liberr.IsAPIError(errNotAPI) {
 		t.Error("IsAPIError should return false for non-APIError")
 	}
 }
