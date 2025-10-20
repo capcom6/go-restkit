@@ -20,7 +20,7 @@ type Client struct {
 	baseURL *url.URL
 }
 
-func (c *Client) Do(ctx context.Context, method, path string, headers map[string]string, payload, response any) error {
+func (c *Client) Do(ctx context.Context, method, path string, headers http.Header, payload, response any) error {
 	var reqBody io.Reader
 	if payload != nil {
 		jsonBytes, err := json.Marshal(payload)
@@ -31,13 +31,15 @@ func (c *Client) Do(ctx context.Context, method, path string, headers map[string
 	}
 
 	if headers == nil {
-		headers = make(map[string]string)
+		headers = http.Header{}
+	} else {
+		headers = headers.Clone()
 	}
-	if headers["Accept"] == "" {
-		headers["Accept"] = "application/json"
+	if headers.Get("Accept") == "" {
+		headers.Set("Accept", "application/json")
 	}
-	if reqBody != nil && headers["Content-Type"] == "" {
-		headers["Content-Type"] = "application/json"
+	if reqBody != nil && headers.Get("Content-Type") == "" {
+		headers.Set("Content-Type", "application/json")
 	}
 
 	return c.DoRAW(ctx, method, path, headers, reqBody, response)
@@ -46,7 +48,7 @@ func (c *Client) Do(ctx context.Context, method, path string, headers map[string
 func (c *Client) DoRAW(
 	ctx context.Context,
 	method, path string,
-	headers map[string]string,
+	headers http.Header,
 	payload io.Reader,
 	response any,
 ) error {
@@ -68,9 +70,7 @@ func (c *Client) DoRAW(
 		return newInternalError("DoRAW", fmt.Errorf("failed to create request: %w", err))
 	}
 
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
+	req.Header = headers
 
 	resp, err := c.client.Do(req)
 	if err != nil {

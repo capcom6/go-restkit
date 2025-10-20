@@ -72,7 +72,7 @@ func TestClient_Do(t *testing.T) {
 		ctx      context.Context
 		method   string
 		path     string
-		headers  map[string]string
+		headers  http.Header
 		payload  any
 		response any
 	}
