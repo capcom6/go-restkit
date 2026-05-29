@@ -67,16 +67,17 @@ Represents server responses with error status codes and provides access to the r
 
 ```go
 type APIError struct {
-    StatusCode int           // HTTP status code
-    URL        string        // The URL that returned the error
-    Body       []byte        // Raw error response body
-    Parsed     interface{}   // Optional parsed error structure
+    StatusCode int         // HTTP status code
+    URL        string      // The URL that returned the error
+    Body       []byte      // Raw error response body
+    Headers    http.Header // Response headers (e.g., rate-limit, Retry-After)
 }
 ```
 
 **Features:**
 - Access to raw error response body via `RawBody()`
 - JSON parsing of error body via `ParseError()`
+- Access to response headers via `Headers` field
 - Implements `ErrorWithBody` interface
 
 **Usage:**
@@ -94,7 +95,43 @@ if apiErr, ok := rest.AsAPIError(err); ok {
     if parseErr := apiErr.ParseError(&customErr); parseErr == nil {
         log.Printf("API error %s: %s", customErr.Code, customErr.Message)
     }
+
+    // Read response headers (e.g., Retry-After on 429 Too Many Requests)
+    if retryAfter := apiErr.Headers.Get("Retry-After"); retryAfter != "" {
+        log.Printf("Retry after %s seconds", retryAfter)
+    }
 }
+```
+
+## Accessing Response Headers
+
+Use `DoWithHeaders` or `DoRAWWithHeaders` when you need to inspect HTTP response headers, such as rate-limit quotas, request IDs, or pagination links.
+
+```go
+headers, err := client.DoWithHeaders(ctx, "GET", "/api/data", nil, nil, &response)
+if err != nil {
+    // Handle error
+}
+
+// Read response headers
+requestID := headers.Get("X-Request-Id")
+rateLimit := headers.Get("X-RateLimit-Remaining")
+```
+
+Headers are returned on both success and error responses. On infrastructure or internal errors, the returned headers will be nil.
+
+```go
+headers, err := client.DoWithHeaders(ctx, "GET", "/api/data", nil, nil, &response)
+if apiErr, ok := rest.AsAPIError(err); ok {
+    // Headers are also available directly on the APIError
+    retryAfter := apiErr.Headers.Get("Retry-After")
+}
+```
+
+For raw requests without JSON serialization:
+
+```go
+headers, err := client.DoRAWWithHeaders(ctx, "GET", "/api/data", nil, nil, &response)
 ```
 
 ## Error Detection Functions
@@ -214,7 +251,8 @@ func TestErrorHandling(t *testing.T) {
 The enhanced error model provides:
 
 - **Clear error classification** with three distinct error types
-- **Rich error information** including response bodies and status codes
+- **Rich error information** including response bodies, status codes, and headers
+- **Response header access** via DoWithHeaders/DoRAWWithHeaders and APIError.Headers
 - **Better testing capabilities** with specific error type detection
 - **Improved error handling** for more robust applications
 
