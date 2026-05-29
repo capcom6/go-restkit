@@ -20,12 +20,27 @@ type Client struct {
 	baseURL *url.URL
 }
 
+// Do performs an HTTP request with JSON serialization of payload and response.
+// Returns an error classified as InternalError, InfrastructureError, or APIError.
 func (c *Client) Do(ctx context.Context, method, path string, headers http.Header, payload, response any) error {
+	_, err := c.DoWithHeaders(ctx, method, path, headers, payload, response)
+	return err
+}
+
+// DoWithHeaders is like Do but also returns the HTTP response headers.
+// Headers are returned on both success and API error (4xx/5xx) responses,
+// allowing access to headers such as Retry-After, X-RateLimit-Remaining, etc.
+func (c *Client) DoWithHeaders(
+	ctx context.Context,
+	method, path string,
+	headers http.Header,
+	payload, response any,
+) (http.Header, error) {
 	var reqBody io.Reader
 	if payload != nil {
 		jsonBytes, err := json.Marshal(payload)
 		if err != nil {
-			return newInternalError("Do", fmt.Errorf("failed to marshal payload: %w", err))
+			return nil, newInternalError("DoWithHeaders", fmt.Errorf("failed to marshal payload: %w", err))
 		}
 		reqBody = bytes.NewReader(jsonBytes)
 	}
@@ -42,9 +57,12 @@ func (c *Client) Do(ctx context.Context, method, path string, headers http.Heade
 		headers.Set("Content-Type", "application/json")
 	}
 
-	return c.DoRAW(ctx, method, path, headers, reqBody, response)
+	return c.do(ctx, method, path, headers, reqBody, response)
 }
 
+// DoRAW performs a raw HTTP request. Unlike Do, the payload is sent as-is
+// without JSON serialization. Returns an error classified as InternalError,
+// InfrastructureError, or APIError.
 func (c *Client) DoRAW(
 	ctx context.Context,
 	method, path string,
@@ -52,29 +70,50 @@ func (c *Client) DoRAW(
 	payload io.Reader,
 	response any,
 ) error {
+	_, err := c.DoRAWWithHeaders(ctx, method, path, headers, payload, response)
+	return err
+}
+
+// DoRAWWithHeaders is like DoRAW but also returns the HTTP response headers.
+// Headers are returned on both success and API error (4xx/5xx) responses.
+func (c *Client) DoRAWWithHeaders(
+	ctx context.Context,
+	method, path string,
+	headers http.Header,
+	payload io.Reader,
+	response any,
+) (http.Header, error) {
+	return c.do(ctx, method, path, headers, payload, response)
+}
+
+func (c *Client) do(
+	ctx context.Context,
+	method, path string,
+	headers http.Header,
+	payload io.Reader,
+	response any,
+) (http.Header, error) {
 	if method == "" {
-		return ErrEmptyMethod
+		return nil, ErrEmptyMethod
 	}
 
-	// Parse the path (this preserves query parameters)
 	pathURL, err := url.Parse(path)
 	if err != nil {
-		return newInternalError("DoRAW", fmt.Errorf("failed to parse path: %w", err))
+		return nil, newInternalError("do", fmt.Errorf("failed to parse path: %w", err))
 	}
 
-	// Resolve the path against the base URL to get a properly encoded full URL
 	fullURL := c.baseURL.ResolveReference(pathURL).String()
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, payload)
 	if err != nil {
-		return newInternalError("DoRAW", fmt.Errorf("failed to create request: %w", err))
+		return nil, newInternalError("do", fmt.Errorf("failed to create request: %w", err))
 	}
 
 	req.Header = headers
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return newInfrastructureError(fullURL, err)
+		return nil, newInfrastructureError(fullURL, err)
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -85,29 +124,30 @@ func (c *Client) DoRAW(
 		const maxErrBody = 1 << 20 // 1 MiB
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
 
-		return c.formatError(resp.StatusCode, body, fullURL)
+		return resp.Header, c.formatError(resp.StatusCode, body, fullURL, resp.Header)
 	}
 
 	if resp.StatusCode == http.StatusNoContent {
-		return nil
+		return resp.Header, nil
 	}
 
 	if response == nil {
-		return nil
+		return resp.Header, nil
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return newInternalError("DoRAW", fmt.Errorf("failed to decode response: %w", err))
+		return resp.Header, newInternalError("DoRAW", fmt.Errorf("failed to decode response: %w", err))
 	}
 
-	return nil
+	return resp.Header, nil
 }
 
-func (c *Client) formatError(statusCode int, body []byte, reqURL string) error {
+func (c *Client) formatError(statusCode int, body []byte, reqURL string, headers http.Header) error {
 	return &APIError{
 		StatusCode: statusCode,
 		URL:        reqURL,
 		Body:       body,
+		Headers:    headers,
 	}
 }
 

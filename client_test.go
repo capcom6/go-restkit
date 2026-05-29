@@ -2,6 +2,7 @@ package restkit_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"math"
 	"net/http"
@@ -13,15 +14,23 @@ import (
 
 func setupTestServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "test-req-123")
+
 		switch r.URL.Path {
 		case "/":
 			if r.Method != http.MethodGet {
 				t.Errorf("Expected method GET, got %s", r.Method)
 			}
+		case "/headers":
+			w.Header().Set("X-Custom", "custom-value")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id": "456"}`))
+			return
 		case "/204":
 			w.WriteHeader(http.StatusNoContent)
 			return
 		case "/400":
+			w.Header().Set("X-Error-Hint", "check-format")
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"message": "bad request"}`))
 			return
@@ -261,6 +270,113 @@ func TestInfrastructureErrorClassification(t *testing.T) {
 	err := client.Do(context.Background(), "GET", "/", nil, nil, nil)
 	if !rest.IsInfrastructureError(err) {
 		t.Error("Expected infrastructure error for unreachable host")
+	}
+}
+
+func TestClient_DoWithHeaders_Success(t *testing.T) {
+	httpServer := setupTestServer(t)
+	defer httpServer.Close()
+
+	client, _ := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
+
+	var result map[string]any
+	headers, err := client.DoWithHeaders(context.Background(), http.MethodGet, "/headers", nil, nil, &result)
+
+	if err != nil {
+		t.Fatalf("DoWithHeaders() unexpected error: %v", err)
+	}
+	if headers == nil {
+		t.Fatal("DoWithHeaders() returned nil headers")
+	}
+	if headers.Get("X-Custom") != "custom-value" {
+		t.Errorf("Expected X-Custom header 'custom-value', got %q", headers.Get("X-Custom"))
+	}
+	if result["id"] != "456" {
+		t.Errorf("Expected response id '456', got %v", result["id"])
+	}
+}
+
+func TestClient_DoRAWWithHeaders_Success(t *testing.T) {
+	httpServer := setupTestServer(t)
+	defer httpServer.Close()
+
+	client, _ := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
+
+	var result map[string]any
+	headers, err := client.DoRAWWithHeaders(context.Background(), http.MethodGet, "/headers", nil, nil, &result)
+
+	if err != nil {
+		t.Fatalf("DoRAWWithHeaders() unexpected error: %v", err)
+	}
+	if headers == nil {
+		t.Fatal("DoRAWWithHeaders() returned nil headers")
+	}
+	if headers.Get("X-Request-Id") != "test-req-123" {
+		t.Errorf("Expected X-Request-Id header 'test-req-123', got %q", headers.Get("X-Request-Id"))
+	}
+}
+
+func TestClient_DoWithHeaders_NoContent(t *testing.T) {
+	httpServer := setupTestServer(t)
+	defer httpServer.Close()
+
+	client, _ := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
+
+	headers, err := client.DoWithHeaders(context.Background(), http.MethodGet, "/204", nil, nil, nil)
+
+	if err != nil {
+		t.Fatalf("DoWithHeaders() unexpected error: %v", err)
+	}
+	if headers == nil {
+		t.Fatal("DoWithHeaders() returned nil headers for 204")
+	}
+	if headers.Get("X-Request-Id") != "test-req-123" {
+		t.Errorf("Expected X-Request-Id header on 204, got %q", headers.Get("X-Request-Id"))
+	}
+}
+
+func TestClient_DoWithHeaders_APIError_WithHeaders(t *testing.T) {
+	httpServer := setupTestServer(t)
+	defer httpServer.Close()
+
+	client, _ := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
+
+	headers, err := client.DoWithHeaders(context.Background(), http.MethodGet, "/400", nil, nil, nil)
+
+	if err == nil {
+		t.Fatal("DoWithHeaders() expected API error")
+	}
+
+	if headers == nil {
+		t.Fatal("DoWithHeaders() returned nil headers on API error")
+	}
+	if headers.Get("X-Error-Hint") != "check-format" {
+		t.Errorf("Expected X-Error-Hint header 'check-format', got %q", headers.Get("X-Error-Hint"))
+	}
+
+	var apiErr *rest.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatal("Expected error to be *APIError")
+	}
+	if apiErr.Headers.Get("X-Error-Hint") != "check-format" {
+		t.Errorf("Expected APIError.Headers X-Error-Hint 'check-format', got %q", apiErr.Headers.Get("X-Error-Hint"))
+	}
+}
+
+func TestClient_Do_BackwardCompat(t *testing.T) {
+	httpServer := setupTestServer(t)
+	defer httpServer.Close()
+
+	client, _ := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
+
+	var result map[string]any
+	err := client.Do(context.Background(), http.MethodGet, "/", nil, nil, &result)
+
+	if err != nil {
+		t.Fatalf("Do() unexpected error: %v", err)
+	}
+	if result["id"] != "123" {
+		t.Errorf("Expected id '123', got %v", result["id"])
 	}
 }
 

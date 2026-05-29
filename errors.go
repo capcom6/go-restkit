@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 )
 
 var (
@@ -56,9 +57,10 @@ func newInfrastructureError(url string, err error) *InfrastructureError {
 
 // APIError represents server responses with error status codes
 type APIError struct {
-	StatusCode int    // HTTP status code
-	URL        string // URL of the request
-	Body       []byte // Raw error response body
+	StatusCode int         // HTTP status code
+	URL        string      // URL of the request
+	Body       []byte      // Raw error response body
+	Headers    http.Header // Response headers (e.g., rate-limit, Retry-After)
 }
 
 func (e *APIError) Error() string {
