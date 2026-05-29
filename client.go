@@ -136,7 +136,7 @@ func (c *Client) do(
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return resp.Header, newInternalError("DoRAW", fmt.Errorf("failed to decode response: %w", err))
+		return resp.Header, newInternalError("do", fmt.Errorf("failed to decode response: %w", err))
 	}
 
 	return resp.Header, nil
