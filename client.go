@@ -103,6 +103,11 @@ func (c *Client) do(
 	if err != nil {
 		return nil, newInternalError("do", fmt.Errorf("failed to parse path: %w", err))
 	}
+	if pathURL.Host != "" && (pathURL.Host != c.baseURL.Host ||
+		(pathURL.Scheme != "" && pathURL.Scheme != c.baseURL.Scheme) ||
+		pathURL.User != nil) {
+		return nil, newInternalError("do", fmt.Errorf("%w: %q", ErrCrossOriginPath, path))
+	}
 
 	fullURL := joinBaseURL(c.baseURL, pathURL, path)
 
@@ -122,7 +127,7 @@ func (c *Client) do(
 		resp.Body.Close()
 	}()
 
-	if resp.StatusCode >= http.StatusBadRequest {
+	if resp.StatusCode >= http.StatusMultipleChoices {
 		const maxErrBody = 1 << 20 // 1 MiB
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
 

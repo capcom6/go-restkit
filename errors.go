@@ -8,10 +8,11 @@ import (
 )
 
 var (
-	ErrInvalidConfig  = errors.New("rest: invalid config")
-	ErrEmptyMethod    = errors.New("rest: empty method")
-	ErrEmptyErrorBody = errors.New("rest: empty error body")
-	ErrUnmarshalJSON  = errors.New("rest: failed to unmarshal body")
+	ErrInvalidConfig   = errors.New("rest: invalid config")
+	ErrEmptyMethod     = errors.New("rest: empty method")
+	ErrEmptyErrorBody  = errors.New("rest: empty error body")
+	ErrUnmarshalJSON   = errors.New("rest: failed to unmarshal body")
+	ErrCrossOriginPath = errors.New("rest: cross-origin path")
 )
 
 // ErrorWithBody provides access to raw error response bodies.

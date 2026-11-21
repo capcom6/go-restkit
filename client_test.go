@@ -419,33 +419,74 @@ func TestClient_Do_BaseURLPathPrefix(t *testing.T) {
 }
 
 func TestClient_Do_AbsoluteURLPath(t *testing.T) {
-	nextServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.RequestURI(); got != "/v2/items?page=2" {
 			t.Errorf("RequestURI() = %q, want %q", got, "/v2/items?page=2")
 		}
 
 		_, _ = w.Write([]byte(`{"values":[]}`))
 	}))
-	defer nextServer.Close()
+	defer httpServer.Close()
 
-	baseServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		t.Errorf("base server received request for %q", r.URL.RequestURI())
+	client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL + "/api/v1"})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	var result map[string]any
+	if err := client.Do(context.Background(), http.MethodGet, httpServer.URL+"/v2/items?page=2", nil, nil, &result); err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+}
+
+func TestClient_Do_RejectsCrossOriginPath(t *testing.T) {
+	otherServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("cross-origin server received a request")
 	}))
-	defer baseServer.Close()
+	defer otherServer.Close()
 
-	client, err := rest.NewClient(rest.Config{BaseURL: baseServer.URL + "/api/v1"})
+	client, err := rest.NewClient(rest.Config{BaseURL: "http://127.0.0.1:1/api/v1"})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	for _, path := range []string{
-		nextServer.URL + "/v2/items?page=2",
-		strings.TrimPrefix(nextServer.URL, "http:") + "/v2/items?page=2",
+		otherServer.URL + "/v2/items",
+		strings.TrimPrefix(otherServer.URL, "http:") + "/v2/items",
+		"https://evil.example/v2/items",
 	} {
-		var result map[string]any
-		if err := client.Do(context.Background(), http.MethodGet, path, nil, nil, &result); err != nil {
-			t.Fatalf("Do() error = %v", err)
+		err := client.Do(context.Background(), http.MethodGet, path, nil, nil, nil)
+		if !rest.IsInternalError(err) {
+			t.Errorf("Do(%q) error = %v, want internal error", path, err)
 		}
+	}
+}
+
+func TestClient_Do_RedirectResponseIsAPIError(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "/moved")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer httpServer.Close()
+
+	client, err := rest.NewClient(rest.Config{
+		BaseURL: httpServer.URL,
+		Client: &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	err = client.Do(context.Background(), http.MethodGet, "/", nil, nil, nil)
+
+	apiErr, ok := rest.AsAPIError(err)
+	if !ok {
+		t.Fatalf("restkit.AsAPIError(err) = false, err = %v", err)
+	}
+	if apiErr.StatusCode != http.StatusTemporaryRedirect {
+		t.Errorf("APIError.StatusCode = %d, want %d", apiErr.StatusCode, http.StatusTemporaryRedirect)
 	}
 }
 
