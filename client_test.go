@@ -14,7 +14,7 @@ import (
 
 func setupTestServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Request-Id", "test-req-123")
+		w.Header().Set("X-Request-ID", "test-req-123")
 
 		switch r.URL.Path {
 		case "/":
@@ -311,8 +311,8 @@ func TestClient_DoRAWWithHeaders_Success(t *testing.T) {
 	if headers == nil {
 		t.Fatal("DoRAWWithHeaders() returned nil headers")
 	}
-	if headers.Get("X-Request-Id") != "test-req-123" {
-		t.Errorf("Expected X-Request-Id header 'test-req-123', got %q", headers.Get("X-Request-Id"))
+	if headers.Get("X-Request-ID") != "test-req-123" {
+		t.Errorf("Expected X-Request-ID header 'test-req-123', got %q", headers.Get("X-Request-ID"))
 	}
 }
 
@@ -330,8 +330,8 @@ func TestClient_DoWithHeaders_NoContent(t *testing.T) {
 	if headers == nil {
 		t.Fatal("DoWithHeaders() returned nil headers for 204")
 	}
-	if headers.Get("X-Request-Id") != "test-req-123" {
-		t.Errorf("Expected X-Request-Id header on 204, got %q", headers.Get("X-Request-Id"))
+	if headers.Get("X-Request-ID") != "test-req-123" {
+		t.Errorf("Expected X-Request-ID header on 204, got %q", headers.Get("X-Request-ID"))
 	}
 }
 
