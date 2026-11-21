@@ -13,6 +13,8 @@ import (
 	rest "github.com/capcom6/go-restkit"
 )
 
+var errCustomRedirect = errors.New("custom redirect policy")
+
 func setupTestServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Request-ID", "test-req-123")
@@ -511,6 +513,143 @@ func TestClient_Do_EmptyBody(t *testing.T) {
 		}
 
 		httpServer.Close()
+	}
+}
+
+func TestClient_Do_AbsolutePathWithoutBaseURL(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.RequestURI(); got != "/v2/items?page=2" {
+			t.Errorf("RequestURI() = %q, want %q", got, "/v2/items?page=2")
+		}
+
+		_, _ = w.Write([]byte(`{"values":[]}`))
+	}))
+	defer httpServer.Close()
+
+	client, err := rest.NewClient(rest.Config{})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	var result map[string]any
+	if err := client.Do(context.Background(), http.MethodGet, httpServer.URL+"/v2/items?page=2", nil, nil, &result); err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+}
+
+func TestClient_Do_RejectsCrossOriginRedirect(t *testing.T) {
+	otherServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("cross-origin server received a redirected request")
+	}))
+	defer otherServer.Close()
+
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", otherServer.URL+"/stolen")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer httpServer.Close()
+
+	client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	headers := http.Header{}
+	headers.Set("X-Api-Key", "secret-value")
+
+	err = client.Do(context.Background(), http.MethodGet, "/", headers, nil, nil)
+	if !rest.IsInternalError(err) {
+		t.Errorf("Do() error = %v, want internal error for cross-origin redirect", err)
+	}
+}
+
+func TestClient_Do_PreservesCustomCheckRedirect(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "/moved")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer httpServer.Close()
+
+	client, err := rest.NewClient(rest.Config{
+		BaseURL: httpServer.URL,
+		Client: &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return errCustomRedirect
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	err = client.Do(context.Background(), http.MethodGet, "/", nil, nil, nil)
+	if !errors.Is(err, errCustomRedirect) {
+		t.Errorf("Do() error = %v, want custom CheckRedirect error", err)
+	}
+}
+
+func TestClient_Do_BaseURLQueryAndFragment(t *testing.T) {
+	t.Run("query stays separate from path", func(t *testing.T) {
+		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.RequestURI(); got != "/api/projects?version=1" {
+				t.Errorf("RequestURI() = %q, want %q", got, "/api/projects?version=1")
+			}
+
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		}))
+		defer httpServer.Close()
+
+		client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL + "/api?version=1"})
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		var result map[string]any
+		if err := client.Do(context.Background(), http.MethodGet, "/projects", nil, nil, &result); err != nil {
+			t.Fatalf("Do() error = %v", err)
+		}
+	})
+
+	t.Run("fragment stays separate from path", func(t *testing.T) {
+		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+		}))
+		defer httpServer.Close()
+
+		client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL + "/api#section"})
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		err = client.Do(context.Background(), http.MethodGet, "/projects", nil, nil, nil)
+
+		apiErr, ok := rest.AsAPIError(err)
+		if !ok {
+			t.Fatalf("restkit.AsAPIError(err) = false, err = %v", err)
+		}
+		if want := httpServer.URL + "/api/projects#section"; apiErr.URL != want {
+			t.Errorf("APIError.URL = %q, want %q", apiErr.URL, want)
+		}
+	})
+}
+
+type eofDestination struct{}
+
+func (eofDestination) UnmarshalJSON([]byte) error { return io.EOF }
+
+func TestClient_Do_DestinationEOFIsInternalError(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"456"}`))
+	}))
+	defer httpServer.Close()
+
+	client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	var dest eofDestination
+	err = client.Do(context.Background(), http.MethodGet, "/", nil, nil, &dest)
+	if !rest.IsInternalError(err) {
+		t.Errorf("Do() error = %v, want internal error for destination EOF", err)
 	}
 }
 

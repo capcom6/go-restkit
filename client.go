@@ -103,9 +103,7 @@ func (c *Client) do(
 	if err != nil {
 		return nil, newInternalError("do", fmt.Errorf("failed to parse path: %w", err))
 	}
-	if pathURL.Host != "" && (pathURL.Host != c.baseURL.Host ||
-		(pathURL.Scheme != "" && pathURL.Scheme != c.baseURL.Scheme) ||
-		pathURL.User != nil) {
+	if pathURL.User != nil || !sameOrigin(c.baseURL, pathURL) {
 		return nil, newInternalError("do", fmt.Errorf("%w: %q", ErrCrossOriginPath, path))
 	}
 
@@ -120,6 +118,10 @@ func (c *Client) do(
 
 	resp, err := c.client.Do(req)
 	if err != nil {
+		if errors.Is(err, ErrCrossOriginPath) {
+			return nil, newInternalError("do", err)
+		}
+
 		return nil, newInfrastructureError(fullURL, err)
 	}
 	defer func() {
@@ -142,8 +144,9 @@ func (c *Client) do(
 		return resp.Header, nil
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		if errors.Is(err, io.EOF) {
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&response); err != nil {
+		if errors.Is(err, io.EOF) && decoder.InputOffset() == 0 {
 			return resp.Header, nil
 		}
 
@@ -162,12 +165,69 @@ func joinBaseURL(base *url.URL, ref *url.URL, path string) string {
 		return path
 	}
 
-	root := strings.TrimRight(base.String(), "/")
-	if path == "" || strings.HasPrefix(path, "?") {
-		return root + path
+	root := *base
+	root.RawQuery = ""
+	root.Fragment = ""
+	root.RawFragment = ""
+
+	full := strings.TrimRight(root.String(), "/")
+	if escaped := ref.EscapedPath(); escaped != "" {
+		full += "/" + strings.TrimLeft(escaped, "/")
 	}
 
-	return root + "/" + strings.TrimLeft(path, "/")
+	query := base.RawQuery
+	if ref.RawQuery != "" || ref.ForceQuery {
+		query = ref.RawQuery
+	}
+	if query != "" {
+		full += "?" + query
+	}
+
+	fragment := base.Fragment
+	if ref.Fragment != "" {
+		fragment = ref.Fragment
+	}
+	if fragment != "" {
+		full += "#" + fragment
+	}
+
+	return full
+}
+
+func sameOrigin(base, ref *url.URL) bool {
+	if ref.Host == "" {
+		return true
+	}
+	if base.Host == "" {
+		return ref.Scheme != ""
+	}
+	if ref.Scheme != "" && ref.Scheme != base.Scheme {
+		return false
+	}
+
+	return ref.Host == base.Host
+}
+
+type originGuard struct {
+	base *url.URL
+	next http.RoundTripper
+}
+
+func (g originGuard) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.User != nil || !sameOrigin(g.base, req.URL) {
+		return nil, fmt.Errorf("%w: %s", ErrCrossOriginPath, req.URL.Redacted())
+	}
+	next := g.next
+	if next == nil {
+		next = http.DefaultTransport
+	}
+
+	resp, err := next.RoundTrip(req)
+	if err != nil {
+		return nil, fmt.Errorf("round trip: %w", err)
+	}
+
+	return resp, nil
 }
 
 func (c *Client) formatError(statusCode int, body []byte, reqURL string, headers http.Header) error {
@@ -180,10 +240,6 @@ func (c *Client) formatError(statusCode int, body []byte, reqURL string, headers
 }
 
 func NewClient(config Config) (*Client, error) {
-	if config.Client == nil {
-		config.Client = http.DefaultClient
-	}
-
 	// Parse the base URL
 	baseURL, err := url.Parse(config.BaseURL)
 	if err != nil {
@@ -194,8 +250,20 @@ func NewClient(config Config) (*Client, error) {
 		return nil, fmt.Errorf("%w: base URL must be absolute (got %q)", ErrInvalidConfig, config.BaseURL)
 	}
 
+	source := config.Client
+	if source == nil {
+		source = http.DefaultClient
+	}
+
+	client := &http.Client{
+		Transport:     originGuard{base: baseURL, next: source.Transport},
+		CheckRedirect: source.CheckRedirect,
+		Jar:           source.Jar,
+		Timeout:       source.Timeout,
+	}
+
 	return &Client{
-		client:  config.Client,
+		client:  client,
 		baseURL: baseURL,
 	}, nil
 }
