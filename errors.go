@@ -63,9 +63,16 @@ type APIError struct {
 	Headers    http.Header // Response headers (e.g., rate-limit, Retry-After)
 }
 
+const maxErrorBodyLen = 512
+
 func (e *APIError) Error() string {
+	body := string(e.Body)
+	if runes := []rune(body); len(runes) > maxErrorBodyLen {
+		body = string(runes[:maxErrorBodyLen]) + "..."
+	}
+
 	return fmt.Sprintf("rest: API error %d from %s: %s",
-		e.StatusCode, e.URL, string(e.Body))
+		e.StatusCode, e.URL, body)
 }
 
 // RawBody returns the raw error response body

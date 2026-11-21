@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 type Config struct {
@@ -102,7 +104,7 @@ func (c *Client) do(
 		return nil, newInternalError("do", fmt.Errorf("failed to parse path: %w", err))
 	}
 
-	fullURL := c.baseURL.ResolveReference(pathURL).String()
+	fullURL := joinBaseURL(c.baseURL, pathURL, path)
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, payload)
 	if err != nil {
@@ -136,10 +138,31 @@ func (c *Client) do(
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		if errors.Is(err, io.EOF) {
+			return resp.Header, nil
+		}
+
 		return resp.Header, newInternalError("do", fmt.Errorf("failed to decode response: %w", err))
 	}
 
 	return resp.Header, nil
+}
+
+func joinBaseURL(base *url.URL, ref *url.URL, path string) string {
+	if ref.Host != "" {
+		if ref.Scheme == "" {
+			return base.Scheme + ":" + path
+		}
+
+		return path
+	}
+
+	root := strings.TrimRight(base.String(), "/")
+	if path == "" || strings.HasPrefix(path, "?") {
+		return root + path
+	}
+
+	return root + "/" + strings.TrimLeft(path, "/")
 }
 
 func (c *Client) formatError(statusCode int, body []byte, reqURL string, headers http.Header) error {

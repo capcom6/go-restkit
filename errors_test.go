@@ -3,6 +3,8 @@ package restkit_test
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"testing"
 
 	liberr "github.com/capcom6/go-restkit"
@@ -98,6 +100,27 @@ func TestAPIError(t *testing.T) {
 
 	if emptyAPIErr.ParseError(&parsed) == nil {
 		t.Error("ParseError() should fail with empty body")
+	}
+}
+
+func TestAPIErrorErrorMessageTruncation(t *testing.T) {
+	t.Parallel()
+
+	apiErr := &liberr.APIError{
+		StatusCode: http.StatusBadGateway,
+		URL:        "http://example.com/api",
+	}
+
+	apiErr.Body = []byte(strings.Repeat("é", 600))
+	want := "rest: API error 502 from http://example.com/api: " + strings.Repeat("é", 512) + "..."
+	if got := apiErr.Error(); got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+
+	apiErr.Body = []byte("short body")
+	want = "rest: API error 502 from http://example.com/api: short body"
+	if got := apiErr.Error(); got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }
 

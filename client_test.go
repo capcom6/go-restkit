@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	rest "github.com/capcom6/go-restkit"
@@ -377,6 +378,98 @@ func TestClient_Do_BackwardCompat(t *testing.T) {
 	}
 	if result["id"] != "123" {
 		t.Errorf("Expected id '123', got %v", result["id"])
+	}
+}
+
+func TestClient_Do_BaseURLPathPrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		basePath string
+		path     string
+		wantURI  string
+	}{
+		{name: "prefix with trailing slash", basePath: "/bit/api/v1/", path: "/projects", wantURI: "/bit/api/v1/projects"},
+		{name: "prefix without trailing slash", basePath: "/bit/api/v1", path: "/projects", wantURI: "/bit/api/v1/projects"},
+		{name: "relative path", basePath: "/bit/api/v1", path: "projects", wantURI: "/bit/api/v1/projects"},
+		{name: "query in path", basePath: "/bit/api/v1", path: "/tasks?limit=5&sort=-created_at", wantURI: "/bit/api/v1/tasks?limit=5&sort=-created_at"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.URL.RequestURI(); got != tt.wantURI {
+					t.Errorf("RequestURI() = %q, want %q", got, tt.wantURI)
+				}
+
+				_, _ = w.Write([]byte(`{"items":[]}`))
+			}))
+			defer httpServer.Close()
+
+			client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL + tt.basePath})
+			if err != nil {
+				t.Fatalf("NewClient() error = %v", err)
+			}
+
+			var result map[string]any
+			if err := client.Do(context.Background(), http.MethodGet, tt.path, nil, nil, &result); err != nil {
+				t.Fatalf("Do() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestClient_Do_AbsoluteURLPath(t *testing.T) {
+	nextServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.RequestURI(); got != "/v2/items?page=2" {
+			t.Errorf("RequestURI() = %q, want %q", got, "/v2/items?page=2")
+		}
+
+		_, _ = w.Write([]byte(`{"values":[]}`))
+	}))
+	defer nextServer.Close()
+
+	baseServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		t.Errorf("base server received request for %q", r.URL.RequestURI())
+	}))
+	defer baseServer.Close()
+
+	client, err := rest.NewClient(rest.Config{BaseURL: baseServer.URL + "/api/v1"})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	for _, path := range []string{
+		nextServer.URL + "/v2/items?page=2",
+		strings.TrimPrefix(nextServer.URL, "http:") + "/v2/items?page=2",
+	} {
+		var result map[string]any
+		if err := client.Do(context.Background(), http.MethodGet, path, nil, nil, &result); err != nil {
+			t.Fatalf("Do() error = %v", err)
+		}
+	}
+}
+
+func TestClient_Do_EmptyBody(t *testing.T) {
+	for _, body := range []string{"", " \n "} {
+		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(body))
+		}))
+
+		client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		result := map[string]any{"preexisting": "value"}
+		if err := client.Do(context.Background(), http.MethodGet, "/", nil, nil, &result); err != nil {
+			t.Errorf("Do() error = %v, want nil", err)
+		}
+		if result["preexisting"] != "value" {
+			t.Errorf("result = %v, want unchanged target", result)
+		}
+
+		httpServer.Close()
 	}
 }
 
