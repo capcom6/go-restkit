@@ -7,10 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 )
+
+const maxRedirects = 10
+
+var errTooManyRedirects = errors.New("stopped after 10 redirects")
 
 type Config struct {
 	Client  *http.Client // Optional HTTP Client, defaults to `http.DefaultClient`
@@ -183,9 +188,9 @@ func joinBaseURL(base *url.URL, ref *url.URL, path string) string {
 		full += "?" + query
 	}
 
-	fragment := base.Fragment
+	fragment := base.EscapedFragment()
 	if ref.Fragment != "" {
-		fragment = ref.Fragment
+		fragment = ref.EscapedFragment()
 	}
 	if fragment != "" {
 		full += "#" + fragment
@@ -201,33 +206,39 @@ func sameOrigin(base, ref *url.URL) bool {
 	if base.Host == "" {
 		return ref.Scheme != ""
 	}
-	if ref.Scheme != "" && ref.Scheme != base.Scheme {
+
+	refScheme := ref.Scheme
+	if refScheme == "" {
+		refScheme = base.Scheme
+	}
+	if !strings.EqualFold(refScheme, base.Scheme) {
 		return false
 	}
 
-	return ref.Host == base.Host
+	baseHost, basePort := effectiveHostPort(base.Host, base.Scheme)
+	refHost, refPort := effectiveHostPort(ref.Host, refScheme)
+
+	return strings.EqualFold(baseHost, refHost) && basePort == refPort
 }
 
-type originGuard struct {
-	base *url.URL
-	next http.RoundTripper
-}
-
-func (g originGuard) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.User != nil || !sameOrigin(g.base, req.URL) {
-		return nil, fmt.Errorf("%w: %s", ErrCrossOriginPath, req.URL.Redacted())
-	}
-	next := g.next
-	if next == nil {
-		next = http.DefaultTransport
-	}
-
-	resp, err := next.RoundTrip(req)
+func effectiveHostPort(host, scheme string) (string, string) {
+	name, port, err := net.SplitHostPort(host)
 	if err != nil {
-		return nil, fmt.Errorf("round trip: %w", err)
+		name, port = host, ""
+	}
+	if port == "" {
+		port = defaultPort(scheme)
 	}
 
-	return resp, nil
+	return strings.Trim(name, "[]"), port
+}
+
+func defaultPort(scheme string) string {
+	if strings.EqualFold(scheme, "https") {
+		return "443"
+	}
+
+	return "80"
 }
 
 func (c *Client) formatError(statusCode int, body []byte, reqURL string, headers http.Header) error {
@@ -256,10 +267,27 @@ func NewClient(config Config) (*Client, error) {
 	}
 
 	client := &http.Client{
-		Transport:     originGuard{base: baseURL, next: source.Transport},
-		CheckRedirect: source.CheckRedirect,
-		Jar:           source.Jar,
-		Timeout:       source.Timeout,
+		Transport: source.Transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if source.CheckRedirect != nil {
+				if err := source.CheckRedirect(req, via); err != nil {
+					if errors.Is(err, http.ErrUseLastResponse) {
+						return http.ErrUseLastResponse
+					}
+
+					return fmt.Errorf("check redirect: %w", err)
+				}
+			} else if len(via) >= maxRedirects {
+				return errTooManyRedirects
+			}
+			if req.URL.User != nil || !sameOrigin(baseURL, req.URL) {
+				return fmt.Errorf("%w: %s", ErrCrossOriginPath, req.URL.Redacted())
+			}
+
+			return nil
+		},
+		Jar:     source.Jar,
+		Timeout: source.Timeout,
 	}
 
 	return &Client{

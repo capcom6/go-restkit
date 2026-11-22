@@ -614,7 +614,7 @@ func TestClient_Do_BaseURLQueryAndFragment(t *testing.T) {
 		}))
 		defer httpServer.Close()
 
-		client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL + "/api#section"})
+		client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL + "/api#a%2Fb"})
 		if err != nil {
 			t.Fatalf("NewClient() error = %v", err)
 		}
@@ -625,7 +625,7 @@ func TestClient_Do_BaseURLQueryAndFragment(t *testing.T) {
 		if !ok {
 			t.Fatalf("restkit.AsAPIError(err) = false, err = %v", err)
 		}
-		if want := httpServer.URL + "/api/projects#section"; apiErr.URL != want {
+		if want := httpServer.URL + "/api/projects#a%2Fb"; apiErr.URL != want {
 			t.Errorf("APIError.URL = %q, want %q", apiErr.URL, want)
 		}
 	})
