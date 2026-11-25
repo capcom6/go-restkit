@@ -14,7 +14,12 @@ func TestSameOrigin(t *testing.T) {
 		ref  string
 		want bool
 	}{
-		{name: "empty port matches default", base: "http://example.test:/api", ref: "http://example.test/v2", want: true},
+		{
+			name: "empty port matches default",
+			base: "http://example.test:/api",
+			ref:  "http://example.test/v2",
+			want: true,
+		},
 		{name: "explicit default port", base: "http://EXAMPLE.test:80/api", ref: "http://example.test/v2", want: true},
 		{name: "case insensitive host", base: "http://EXAMPLE.test/api", ref: "http://example.test/v2", want: true},
 		{name: "different scheme", base: "https://example.test/api", ref: "http://example.test/v2", want: false},

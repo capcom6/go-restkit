@@ -74,8 +74,10 @@ func setupTestServer(t *testing.T) *httptest.Server {
 }
 
 func TestClient_Do(t *testing.T) {
+	t.Parallel()
+
 	httpServer := setupTestServer(t)
-	defer httpServer.Close()
+	t.Cleanup(httpServer.Close)
 
 	type fields struct {
 		config rest.Config
@@ -234,6 +236,8 @@ func TestClient_Do(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			c, _ := rest.NewClient(tt.fields.config)
 			err := c.Do(tt.args.ctx, tt.args.method, tt.args.path, tt.args.headers, tt.args.payload, tt.args.response)
 
@@ -258,6 +262,8 @@ func TestClient_Do(t *testing.T) {
 }
 
 func TestInternalErrorClassification(t *testing.T) {
+	t.Parallel()
+
 	httpServer := setupTestServer(t)
 	defer httpServer.Close()
 
@@ -269,6 +275,8 @@ func TestInternalErrorClassification(t *testing.T) {
 }
 
 func TestInfrastructureErrorClassification(t *testing.T) {
+	t.Parallel()
+
 	client, _ := rest.NewClient(rest.Config{BaseURL: "http://localhost:1"})
 	err := client.Do(context.Background(), "GET", "/", nil, nil, nil)
 	if !rest.IsInfrastructureError(err) {
@@ -277,6 +285,8 @@ func TestInfrastructureErrorClassification(t *testing.T) {
 }
 
 func TestClient_DoWithHeaders_Success(t *testing.T) {
+	t.Parallel()
+
 	httpServer := setupTestServer(t)
 	defer httpServer.Close()
 
@@ -300,6 +310,8 @@ func TestClient_DoWithHeaders_Success(t *testing.T) {
 }
 
 func TestClient_DoRAWWithHeaders_Success(t *testing.T) {
+	t.Parallel()
+
 	httpServer := setupTestServer(t)
 	defer httpServer.Close()
 
@@ -320,6 +332,8 @@ func TestClient_DoRAWWithHeaders_Success(t *testing.T) {
 }
 
 func TestClient_DoWithHeaders_NoContent(t *testing.T) {
+	t.Parallel()
+
 	httpServer := setupTestServer(t)
 	defer httpServer.Close()
 
@@ -339,6 +353,8 @@ func TestClient_DoWithHeaders_NoContent(t *testing.T) {
 }
 
 func TestClient_DoWithHeaders_APIError_WithHeaders(t *testing.T) {
+	t.Parallel()
+
 	httpServer := setupTestServer(t)
 	defer httpServer.Close()
 
@@ -367,6 +383,8 @@ func TestClient_DoWithHeaders_APIError_WithHeaders(t *testing.T) {
 }
 
 func TestClient_Do_BackwardCompat(t *testing.T) {
+	t.Parallel()
+
 	httpServer := setupTestServer(t)
 	defer httpServer.Close()
 
@@ -384,20 +402,39 @@ func TestClient_Do_BackwardCompat(t *testing.T) {
 }
 
 func TestClient_Do_BaseURLPathPrefix(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		basePath string
 		path     string
 		wantURI  string
 	}{
-		{name: "prefix with trailing slash", basePath: "/bit/api/v1/", path: "/projects", wantURI: "/bit/api/v1/projects"},
-		{name: "prefix without trailing slash", basePath: "/bit/api/v1", path: "/projects", wantURI: "/bit/api/v1/projects"},
+		{
+			name:     "prefix with trailing slash",
+			basePath: "/bit/api/v1/",
+			path:     "/projects",
+			wantURI:  "/bit/api/v1/projects",
+		},
+		{
+			name:     "prefix without trailing slash",
+			basePath: "/bit/api/v1",
+			path:     "/projects",
+			wantURI:  "/bit/api/v1/projects",
+		},
 		{name: "relative path", basePath: "/bit/api/v1", path: "projects", wantURI: "/bit/api/v1/projects"},
-		{name: "query in path", basePath: "/bit/api/v1", path: "/tasks?limit=5&sort=-created_at", wantURI: "/bit/api/v1/tasks?limit=5&sort=-created_at"},
+		{
+			name:     "query in path",
+			basePath: "/bit/api/v1",
+			path:     "/tasks?limit=5&sort=-created_at",
+			wantURI:  "/bit/api/v1/tasks?limit=5&sort=-created_at",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if got := r.URL.RequestURI(); got != tt.wantURI {
 					t.Errorf("RequestURI() = %q, want %q", got, tt.wantURI)
@@ -413,14 +450,16 @@ func TestClient_Do_BaseURLPathPrefix(t *testing.T) {
 			}
 
 			var result map[string]any
-			if err := client.Do(context.Background(), http.MethodGet, tt.path, nil, nil, &result); err != nil {
-				t.Fatalf("Do() error = %v", err)
+			if doErr := client.Do(context.Background(), http.MethodGet, tt.path, nil, nil, &result); doErr != nil {
+				t.Fatalf("Do() error = %v", doErr)
 			}
 		})
 	}
 }
 
 func TestClient_Do_AbsoluteURLPath(t *testing.T) {
+	t.Parallel()
+
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.RequestURI(); got != "/v2/items?page=2" {
 			t.Errorf("RequestURI() = %q, want %q", got, "/v2/items?page=2")
@@ -436,12 +475,21 @@ func TestClient_Do_AbsoluteURLPath(t *testing.T) {
 	}
 
 	var result map[string]any
-	if err := client.Do(context.Background(), http.MethodGet, httpServer.URL+"/v2/items?page=2", nil, nil, &result); err != nil {
-		t.Fatalf("Do() error = %v", err)
+	if doErr := client.Do(
+		context.Background(),
+		http.MethodGet,
+		httpServer.URL+"/v2/items?page=2",
+		nil,
+		nil,
+		&result,
+	); doErr != nil {
+		t.Fatalf("Do() error = %v", doErr)
 	}
 }
 
 func TestClient_Do_RejectsCrossOriginPath(t *testing.T) {
+	t.Parallel()
+
 	otherServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("cross-origin server received a request")
 	}))
@@ -457,14 +505,16 @@ func TestClient_Do_RejectsCrossOriginPath(t *testing.T) {
 		strings.TrimPrefix(otherServer.URL, "http:") + "/v2/items",
 		"https://evil.example/v2/items",
 	} {
-		err := client.Do(context.Background(), http.MethodGet, path, nil, nil, nil)
-		if !rest.IsInternalError(err) {
-			t.Errorf("Do(%q) error = %v, want internal error", path, err)
+		doErr := client.Do(context.Background(), http.MethodGet, path, nil, nil, nil)
+		if !rest.IsInternalError(doErr) {
+			t.Errorf("Do(%q) error = %v, want internal error", path, doErr)
 		}
 	}
 }
 
 func TestClient_Do_RedirectResponseIsAPIError(t *testing.T) {
+	t.Parallel()
+
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Location", "/moved")
 		w.WriteHeader(http.StatusTemporaryRedirect)
@@ -493,6 +543,8 @@ func TestClient_Do_RedirectResponseIsAPIError(t *testing.T) {
 }
 
 func TestClient_Do_EmptyBody(t *testing.T) {
+	t.Parallel()
+
 	for _, body := range []string{"", " \n "} {
 		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -505,8 +557,8 @@ func TestClient_Do_EmptyBody(t *testing.T) {
 		}
 
 		result := map[string]any{"preexisting": "value"}
-		if err := client.Do(context.Background(), http.MethodGet, "/", nil, nil, &result); err != nil {
-			t.Errorf("Do() error = %v, want nil", err)
+		if doErr := client.Do(context.Background(), http.MethodGet, "/", nil, nil, &result); doErr != nil {
+			t.Errorf("Do() error = %v, want nil", doErr)
 		}
 		if result["preexisting"] != "value" {
 			t.Errorf("result = %v, want unchanged target", result)
@@ -517,6 +569,8 @@ func TestClient_Do_EmptyBody(t *testing.T) {
 }
 
 func TestClient_Do_AbsolutePathWithoutBaseURL(t *testing.T) {
+	t.Parallel()
+
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.RequestURI(); got != "/v2/items?page=2" {
 			t.Errorf("RequestURI() = %q, want %q", got, "/v2/items?page=2")
@@ -532,12 +586,21 @@ func TestClient_Do_AbsolutePathWithoutBaseURL(t *testing.T) {
 	}
 
 	var result map[string]any
-	if err := client.Do(context.Background(), http.MethodGet, httpServer.URL+"/v2/items?page=2", nil, nil, &result); err != nil {
-		t.Fatalf("Do() error = %v", err)
+	if doErr := client.Do(
+		context.Background(),
+		http.MethodGet,
+		httpServer.URL+"/v2/items?page=2",
+		nil,
+		nil,
+		&result,
+	); doErr != nil {
+		t.Fatalf("Do() error = %v", doErr)
 	}
 }
 
 func TestClient_Do_RejectsCrossOriginRedirect(t *testing.T) {
+	t.Parallel()
+
 	otherServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("cross-origin server received a redirected request")
 	}))
@@ -564,6 +627,8 @@ func TestClient_Do_RejectsCrossOriginRedirect(t *testing.T) {
 }
 
 func TestClient_Do_PreservesCustomCheckRedirect(t *testing.T) {
+	t.Parallel()
+
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Location", "/moved")
 		w.WriteHeader(http.StatusFound)
@@ -587,7 +652,11 @@ func TestClient_Do_PreservesCustomCheckRedirect(t *testing.T) {
 }
 
 func TestClient_Do_BaseURLQueryAndFragment(t *testing.T) {
+	t.Parallel()
+
 	t.Run("query stays separate from path", func(t *testing.T) {
+		t.Parallel()
+
 		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if got := r.URL.RequestURI(); got != "/api/projects?version=1" {
 				t.Errorf("RequestURI() = %q, want %q", got, "/api/projects?version=1")
@@ -603,12 +672,14 @@ func TestClient_Do_BaseURLQueryAndFragment(t *testing.T) {
 		}
 
 		var result map[string]any
-		if err := client.Do(context.Background(), http.MethodGet, "/projects", nil, nil, &result); err != nil {
-			t.Fatalf("Do() error = %v", err)
+		if doErr := client.Do(context.Background(), http.MethodGet, "/projects", nil, nil, &result); doErr != nil {
+			t.Fatalf("Do() error = %v", doErr)
 		}
 	})
 
 	t.Run("fragment stays separate from path", func(t *testing.T) {
+		t.Parallel()
+
 		httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 		}))
@@ -636,6 +707,8 @@ type eofDestination struct{}
 func (eofDestination) UnmarshalJSON([]byte) error { return io.EOF }
 
 func TestClient_Do_DestinationEOFIsInternalError(t *testing.T) {
+	t.Parallel()
+
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"id":"456"}`))
 	}))
@@ -654,6 +727,8 @@ func TestClient_Do_DestinationEOFIsInternalError(t *testing.T) {
 }
 
 func TestAPIErrorBodyParsing(t *testing.T) {
+	t.Parallel()
+
 	httpServer := setupTestServer(t)
 	defer httpServer.Close()
 
@@ -668,7 +743,7 @@ func TestAPIErrorBodyParsing(t *testing.T) {
 	var customErr struct {
 		Message string `json:"message"`
 	}
-	if err := apiErr.ParseError(&customErr); err != nil {
+	if parseErr := apiErr.ParseError(&customErr); parseErr != nil {
 		t.Error("Failed to parse error body")
 	}
 	if customErr.Message != "bad request" {

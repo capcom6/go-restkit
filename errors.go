@@ -16,13 +16,13 @@ var (
 )
 
 // ErrorWithBody provides access to raw error response bodies.
-// ParseError expects target to be a pointer to a struct; it returns a json.Unmarshal error otherwise.
+// ParseError expects target to be a pointer to a struct; it returns a [json.Unmarshal] error otherwise.
 type ErrorWithBody interface {
 	RawBody() []byte             // RawBody returns the raw error response body
 	ParseError(target any) error // ParseError attempts to parse the error body
 }
 
-// InternalError represents errors in request construction
+// InternalError represents errors in request construction.
 type InternalError struct {
 	Err error  // Underlying error
 	Op  string // Operation where error occurred
@@ -34,12 +34,12 @@ func (e *InternalError) Error() string {
 
 func (e *InternalError) Unwrap() error { return e.Err }
 
-// newInternalError creates a new InternalError
+// newInternalError creates a new InternalError.
 func newInternalError(op string, err error) *InternalError {
 	return &InternalError{Err: err, Op: op}
 }
 
-// InfrastructureError represents network-level failures
+// InfrastructureError represents network-level failures.
 type InfrastructureError struct {
 	Err error
 	URL string
@@ -51,12 +51,12 @@ func (e *InfrastructureError) Error() string {
 
 func (e *InfrastructureError) Unwrap() error { return e.Err }
 
-// newInfrastructureError creates a new InfrastructureError
+// newInfrastructureError creates a new InfrastructureError.
 func newInfrastructureError(url string, err error) *InfrastructureError {
 	return &InfrastructureError{Err: err, URL: url}
 }
 
-// APIError represents server responses with error status codes
+// APIError represents server responses with error status codes.
 type APIError struct {
 	StatusCode int         // HTTP status code
 	URL        string      // URL of the request
@@ -76,12 +76,12 @@ func (e *APIError) Error() string {
 		e.StatusCode, e.URL, body)
 }
 
-// RawBody returns the raw error response body
+// RawBody returns the raw error response body.
 func (e *APIError) RawBody() []byte {
 	return e.Body
 }
 
-// ParseError attempts to parse the error body into the provided struct
+// ParseError attempts to parse the error body into the provided struct.
 func (e *APIError) ParseError(target any) error {
 	if len(e.Body) == 0 {
 		return ErrEmptyErrorBody
@@ -92,7 +92,7 @@ func (e *APIError) ParseError(target any) error {
 	return nil
 }
 
-// AsAPIError attempts to extract an APIError from an error chain
+// AsAPIError attempts to extract an APIError from an error chain.
 func AsAPIError(err error) (*APIError, bool) {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
@@ -101,19 +101,19 @@ func AsAPIError(err error) (*APIError, bool) {
 	return nil, false
 }
 
-// IsInternalError checks if error is an internal library error
+// IsInternalError checks if error is an internal library error.
 func IsInternalError(err error) bool {
 	var target *InternalError
 	return errors.As(err, &target)
 }
 
-// IsInfrastructureError checks if error is a network infrastructure error
+// IsInfrastructureError checks if error is a network infrastructure error.
 func IsInfrastructureError(err error) bool {
 	var target *InfrastructureError
 	return errors.As(err, &target)
 }
 
-// IsAPIError checks if an error is an API error with a response body
+// IsAPIError checks if an error is an API error with a response body.
 func IsAPIError(err error) bool {
 	var target ErrorWithBody
 	return errors.As(err, &target)

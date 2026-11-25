@@ -27,6 +27,52 @@ type Client struct {
 	baseURL *url.URL
 }
 
+func NewClient(config Config) (*Client, error) {
+	// Parse the base URL
+	baseURL, err := url.Parse(config.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base URL: %w", err)
+	}
+
+	if config.BaseURL != "" && baseURL.Scheme == "" {
+		return nil, fmt.Errorf("%w: base URL must be absolute (got %q)", ErrInvalidConfig, config.BaseURL)
+	}
+
+	source := config.Client
+	if source == nil {
+		source = http.DefaultClient
+	}
+
+	client := &http.Client{
+		Transport: source.Transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if source.CheckRedirect != nil {
+				if redirectErr := source.CheckRedirect(req, via); redirectErr != nil {
+					if errors.Is(redirectErr, http.ErrUseLastResponse) {
+						return http.ErrUseLastResponse
+					}
+
+					return fmt.Errorf("check redirect: %w", redirectErr)
+				}
+			} else if len(via) >= maxRedirects {
+				return errTooManyRedirects
+			}
+			if req.URL.User != nil || !sameOrigin(baseURL, req.URL) {
+				return fmt.Errorf("%w: %s", ErrCrossOriginPath, req.URL.Redacted())
+			}
+
+			return nil
+		},
+		Jar:     source.Jar,
+		Timeout: source.Timeout,
+	}
+
+	return &Client{
+		client:  client,
+		baseURL: baseURL,
+	}, nil
+}
+
 // Do performs an HTTP request with JSON serialization of payload and response.
 // Returns an error classified as InternalError, InfrastructureError, or APIError.
 func (c *Client) Do(ctx context.Context, method, path string, headers http.Header, payload, response any) error {
@@ -131,7 +177,7 @@ func (c *Client) do(
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode >= http.StatusMultipleChoices {
@@ -150,12 +196,12 @@ func (c *Client) do(
 	}
 
 	decoder := json.NewDecoder(resp.Body)
-	if err := decoder.Decode(&response); err != nil {
-		if errors.Is(err, io.EOF) && decoder.InputOffset() == 0 {
+	if decodeErr := decoder.Decode(&response); decodeErr != nil {
+		if errors.Is(decodeErr, io.EOF) && decoder.InputOffset() == 0 {
 			return resp.Header, nil
 		}
 
-		return resp.Header, newInternalError("do", fmt.Errorf("failed to decode response: %w", err))
+		return resp.Header, newInternalError("do", fmt.Errorf("failed to decode response: %w", decodeErr))
 	}
 
 	return resp.Header, nil
@@ -248,50 +294,4 @@ func (c *Client) formatError(statusCode int, body []byte, reqURL string, headers
 		Body:       body,
 		Headers:    headers,
 	}
-}
-
-func NewClient(config Config) (*Client, error) {
-	// Parse the base URL
-	baseURL, err := url.Parse(config.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse base URL: %w", err)
-	}
-
-	if config.BaseURL != "" && baseURL.Scheme == "" {
-		return nil, fmt.Errorf("%w: base URL must be absolute (got %q)", ErrInvalidConfig, config.BaseURL)
-	}
-
-	source := config.Client
-	if source == nil {
-		source = http.DefaultClient
-	}
-
-	client := &http.Client{
-		Transport: source.Transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if source.CheckRedirect != nil {
-				if err := source.CheckRedirect(req, via); err != nil {
-					if errors.Is(err, http.ErrUseLastResponse) {
-						return http.ErrUseLastResponse
-					}
-
-					return fmt.Errorf("check redirect: %w", err)
-				}
-			} else if len(via) >= maxRedirects {
-				return errTooManyRedirects
-			}
-			if req.URL.User != nil || !sameOrigin(baseURL, req.URL) {
-				return fmt.Errorf("%w: %s", ErrCrossOriginPath, req.URL.Redacted())
-			}
-
-			return nil
-		},
-		Jar:     source.Jar,
-		Timeout: source.Timeout,
-	}
-
-	return &Client{
-		client:  client,
-		baseURL: baseURL,
-	}, nil
 }

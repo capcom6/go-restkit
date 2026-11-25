@@ -47,7 +47,10 @@ func TestInfrastructureError(t *testing.T) {
 	}
 
 	if infraErr.Error() != "rest: infrastructure error contacting http://example.com: original error" {
-		t.Errorf("Expected error message 'rest: infrastructure error contacting http://example.com: original error', got '%s'", infraErr.Error())
+		t.Errorf(
+			"Expected error message 'rest: infrastructure error contacting http://example.com: original error', got '%s'",
+			infraErr.Error(),
+		)
 	}
 
 	if !errors.Is(infraErr, errWrapped) {
