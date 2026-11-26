@@ -218,19 +218,22 @@ func joinBaseURL(base *url.URL, ref *url.URL, path string) string {
 
 	root := *base
 	root.RawQuery = ""
+	root.ForceQuery = false
 	root.Fragment = ""
 	root.RawFragment = ""
 
-	full := strings.TrimRight(root.String(), "/")
+	full := root.String()
 	if escaped := ref.EscapedPath(); escaped != "" {
-		full += "/" + strings.TrimLeft(escaped, "/")
+		full = strings.TrimRight(full, "/") + "/" + strings.TrimLeft(escaped, "/")
 	}
 
 	query := base.RawQuery
+	forceQuery := base.ForceQuery
 	if ref.RawQuery != "" || ref.ForceQuery {
 		query = ref.RawQuery
+		forceQuery = ref.ForceQuery
 	}
-	if query != "" {
+	if query != "" || forceQuery {
 		full += "?" + query
 	}
 

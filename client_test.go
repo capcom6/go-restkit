@@ -677,6 +677,62 @@ func TestClient_Do_BaseURLQueryAndFragment(t *testing.T) {
 		}
 	})
 
+	t.Run("empty query markers and trailing slashes", func(t *testing.T) {
+		t.Parallel()
+
+		cases := []struct {
+			name     string
+			basePath string
+			path     string
+			wantURI  string
+		}{
+			{
+				name:     "base empty query stays after path",
+				basePath: "/api?",
+				path:     "/projects",
+				wantURI:  "/api/projects?",
+			},
+			{
+				name:     "path empty query stays after path",
+				basePath: "/api",
+				path:     "/projects?",
+				wantURI:  "/api/projects?",
+			},
+			{
+				name:     "query-only ref keeps base trailing slash",
+				basePath: "/items/",
+				path:     "?page=2",
+				wantURI:  "/items/?page=2",
+			},
+			{name: "empty ref keeps base trailing slash", basePath: "/items/", path: "", wantURI: "/items/"},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if got := r.URL.RequestURI(); got != tc.wantURI {
+						t.Errorf("RequestURI() = %q, want %q", got, tc.wantURI)
+					}
+
+					_, _ = w.Write([]byte(`{"items":[]}`))
+				}))
+				defer httpServer.Close()
+
+				client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL + tc.basePath})
+				if err != nil {
+					t.Fatalf("NewClient() error = %v", err)
+				}
+
+				var result map[string]any
+				if doErr := client.Do(context.Background(), http.MethodGet, tc.path, nil, nil, &result); doErr != nil {
+					t.Fatalf("Do() error = %v", doErr)
+				}
+			})
+		}
+	})
+
 	t.Run("fragment stays separate from path", func(t *testing.T) {
 		t.Parallel()
 
