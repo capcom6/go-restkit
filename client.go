@@ -13,10 +13,6 @@ import (
 	"strings"
 )
 
-const maxRedirects = 10
-
-var errTooManyRedirects = errors.New("stopped after 10 redirects")
-
 type Config struct {
 	Client  *http.Client // Optional HTTP Client, defaults to `http.DefaultClient`
 	BaseURL string       // Optional base URL
@@ -38,37 +34,13 @@ func NewClient(config Config) (*Client, error) {
 		return nil, fmt.Errorf("%w: base URL must be absolute (got %q)", ErrInvalidConfig, config.BaseURL)
 	}
 
-	source := config.Client
-	if source == nil {
-		source = http.DefaultClient
-	}
-
-	client := &http.Client{
-		Transport: source.Transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if source.CheckRedirect != nil {
-				if redirectErr := source.CheckRedirect(req, via); redirectErr != nil {
-					if errors.Is(redirectErr, http.ErrUseLastResponse) {
-						return http.ErrUseLastResponse
-					}
-
-					return fmt.Errorf("check redirect: %w", redirectErr)
-				}
-			} else if len(via) >= maxRedirects {
-				return errTooManyRedirects
-			}
-			if req.URL.User != nil || !sameOrigin(baseURL, req.URL) {
-				return fmt.Errorf("%w: %s", ErrCrossOriginPath, req.URL.Redacted())
-			}
-
-			return nil
-		},
-		Jar:     source.Jar,
-		Timeout: source.Timeout,
+	httpClient := config.Client
+	if httpClient == nil {
+		httpClient = http.DefaultClient
 	}
 
 	return &Client{
-		client:  client,
+		client:  httpClient,
 		baseURL: baseURL,
 	}, nil
 }
@@ -169,10 +141,6 @@ func (c *Client) do(
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		if errors.Is(err, ErrCrossOriginPath) {
-			return nil, newInternalError("do", err)
-		}
-
 		return nil, newInfrastructureError(fullURL, err)
 	}
 	defer func() {

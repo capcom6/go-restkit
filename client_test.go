@@ -598,34 +598,6 @@ func TestClient_Do_AbsolutePathWithoutBaseURL(t *testing.T) {
 	}
 }
 
-func TestClient_Do_RejectsCrossOriginRedirect(t *testing.T) {
-	t.Parallel()
-
-	otherServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		t.Error("cross-origin server received a redirected request")
-	}))
-	defer otherServer.Close()
-
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Location", otherServer.URL+"/stolen")
-		w.WriteHeader(http.StatusFound)
-	}))
-	defer httpServer.Close()
-
-	client, err := rest.NewClient(rest.Config{BaseURL: httpServer.URL})
-	if err != nil {
-		t.Fatalf("NewClient() error = %v", err)
-	}
-
-	headers := http.Header{}
-	headers.Set("X-Api-Key", "secret-value")
-
-	err = client.Do(context.Background(), http.MethodGet, "/", headers, nil, nil)
-	if !rest.IsInternalError(err) {
-		t.Errorf("Do() error = %v, want internal error for cross-origin redirect", err)
-	}
-}
-
 func TestClient_Do_PreservesCustomCheckRedirect(t *testing.T) {
 	t.Parallel()
 
