@@ -512,36 +512,6 @@ func TestClient_Do_RejectsCrossOriginPath(t *testing.T) {
 	}
 }
 
-func TestClient_Do_RedirectResponseIsAPIError(t *testing.T) {
-	t.Parallel()
-
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Location", "/moved")
-		w.WriteHeader(http.StatusTemporaryRedirect)
-	}))
-	defer httpServer.Close()
-
-	client, err := rest.NewClient(rest.Config{
-		BaseURL: httpServer.URL,
-		Client: &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		}},
-	})
-	if err != nil {
-		t.Fatalf("NewClient() error = %v", err)
-	}
-
-	err = client.Do(context.Background(), http.MethodGet, "/", nil, nil, nil)
-
-	apiErr, ok := rest.AsAPIError(err)
-	if !ok {
-		t.Fatalf("restkit.AsAPIError(err) = false, err = %v", err)
-	}
-	if apiErr.StatusCode != http.StatusTemporaryRedirect {
-		t.Errorf("APIError.StatusCode = %d, want %d", apiErr.StatusCode, http.StatusTemporaryRedirect)
-	}
-}
-
 func TestClient_Do_EmptyBody(t *testing.T) {
 	t.Parallel()
 

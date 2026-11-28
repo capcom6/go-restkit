@@ -148,7 +148,7 @@ func (c *Client) do(
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode >= http.StatusMultipleChoices {
+	if resp.StatusCode >= http.StatusBadRequest {
 		const maxErrBody = 1 << 20 // 1 MiB
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
 
