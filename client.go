@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 type Config struct {
@@ -18,6 +21,28 @@ type Config struct {
 type Client struct {
 	client  *http.Client
 	baseURL *url.URL
+}
+
+func NewClient(config Config) (*Client, error) {
+	// Parse the base URL
+	baseURL, err := url.Parse(config.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base URL: %w", err)
+	}
+
+	if config.BaseURL != "" && baseURL.Scheme == "" {
+		return nil, fmt.Errorf("%w: base URL must be absolute (got %q)", ErrInvalidConfig, config.BaseURL)
+	}
+
+	httpClient := config.Client
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+
+	return &Client{
+		client:  httpClient,
+		baseURL: baseURL,
+	}, nil
 }
 
 // Do performs an HTTP request with JSON serialization of payload and response.
@@ -101,8 +126,11 @@ func (c *Client) do(
 	if err != nil {
 		return nil, newInternalError("do", fmt.Errorf("failed to parse path: %w", err))
 	}
+	if pathURL.User != nil || !sameOrigin(c.baseURL, pathURL) {
+		return nil, newInternalError("do", fmt.Errorf("%w: %q", ErrCrossOriginPath, path))
+	}
 
-	fullURL := c.baseURL.ResolveReference(pathURL).String()
+	fullURL := joinBaseURL(c.baseURL, pathURL, path)
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, payload)
 	if err != nil {
@@ -117,7 +145,7 @@ func (c *Client) do(
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode >= http.StatusBadRequest {
@@ -135,11 +163,99 @@ func (c *Client) do(
 		return resp.Header, nil
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return resp.Header, newInternalError("do", fmt.Errorf("failed to decode response: %w", err))
+	decoder := json.NewDecoder(resp.Body)
+	if decodeErr := decoder.Decode(&response); decodeErr != nil {
+		if errors.Is(decodeErr, io.EOF) && decoder.InputOffset() == 0 {
+			return resp.Header, nil
+		}
+
+		return resp.Header, newInternalError("do", fmt.Errorf("failed to decode response: %w", decodeErr))
 	}
 
 	return resp.Header, nil
+}
+
+func joinBaseURL(base *url.URL, ref *url.URL, path string) string {
+	if ref.Host != "" {
+		if ref.Scheme == "" {
+			return base.Scheme + ":" + path
+		}
+
+		return path
+	}
+
+	root := *base
+	root.RawQuery = ""
+	root.ForceQuery = false
+	root.Fragment = ""
+	root.RawFragment = ""
+
+	full := root.String()
+	if escaped := ref.EscapedPath(); escaped != "" {
+		full = strings.TrimRight(full, "/") + "/" + strings.TrimLeft(escaped, "/")
+	}
+
+	query := base.RawQuery
+	forceQuery := base.ForceQuery
+	if ref.RawQuery != "" || ref.ForceQuery {
+		query = ref.RawQuery
+		forceQuery = ref.ForceQuery
+	}
+	if query != "" || forceQuery {
+		full += "?" + query
+	}
+
+	fragment := base.EscapedFragment()
+	if ref.Fragment != "" {
+		fragment = ref.EscapedFragment()
+	}
+	if fragment != "" {
+		full += "#" + fragment
+	}
+
+	return full
+}
+
+func sameOrigin(base, ref *url.URL) bool {
+	if ref.Host == "" {
+		return true
+	}
+	if base.Host == "" {
+		return ref.Scheme != ""
+	}
+
+	refScheme := ref.Scheme
+	if refScheme == "" {
+		refScheme = base.Scheme
+	}
+	if !strings.EqualFold(refScheme, base.Scheme) {
+		return false
+	}
+
+	baseHost, basePort := effectiveHostPort(base.Host, base.Scheme)
+	refHost, refPort := effectiveHostPort(ref.Host, refScheme)
+
+	return strings.EqualFold(baseHost, refHost) && basePort == refPort
+}
+
+func effectiveHostPort(host, scheme string) (string, string) {
+	name, port, err := net.SplitHostPort(host)
+	if err != nil {
+		name, port = host, ""
+	}
+	if port == "" {
+		port = defaultPort(scheme)
+	}
+
+	return strings.Trim(name, "[]"), port
+}
+
+func defaultPort(scheme string) string {
+	if strings.EqualFold(scheme, "https") {
+		return "443"
+	}
+
+	return "80"
 }
 
 func (c *Client) formatError(statusCode int, body []byte, reqURL string, headers http.Header) error {
@@ -149,25 +265,4 @@ func (c *Client) formatError(statusCode int, body []byte, reqURL string, headers
 		Body:       body,
 		Headers:    headers,
 	}
-}
-
-func NewClient(config Config) (*Client, error) {
-	if config.Client == nil {
-		config.Client = http.DefaultClient
-	}
-
-	// Parse the base URL
-	baseURL, err := url.Parse(config.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse base URL: %w", err)
-	}
-
-	if config.BaseURL != "" && baseURL.Scheme == "" {
-		return nil, fmt.Errorf("%w: base URL must be absolute (got %q)", ErrInvalidConfig, config.BaseURL)
-	}
-
-	return &Client{
-		client:  config.Client,
-		baseURL: baseURL,
-	}, nil
 }
